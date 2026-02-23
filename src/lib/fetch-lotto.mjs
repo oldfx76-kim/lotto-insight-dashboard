@@ -6,30 +6,39 @@ const supabase = createClient(
 );
 
 async function fetchLottoData(drawNo) {
-  const res = await fetch(`https://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo=${drawNo}`);
-  const data = await res.json();
-  return data;
+  try {
+    const res = await fetch(`https://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo=${drawNo}`);
+    const text = await res.text(); // 먼저 텍스트로 받아서 확인
+    
+    // 응답이 HTML 형식이면 실패로 간주
+    if (text.includes('<!DOCTYPE')) {
+      return { returnValue: 'fail', reason: 'HTML_RESPONSE' };
+    }
+    
+    return JSON.parse(text);
+  } catch (e) {
+    return { returnValue: 'fail', reason: e.message };
+  }
 }
 
 async function syncLottoHistory() {
   try {
     console.log("🚀 로또 데이터 동기화 엔진 가동...");
 
-    // 1. DB에서 가장 높은 회차 가져오기
     const { data: lastEntry } = await supabase
       .from('lotto_history')
       .select('draw_no')
       .order('draw_no', { ascending: false })
       .limit(1);
 
-    // 데이터가 없으면 1140회부터 시작 (범위를 넓혔습니다), 있으면 다음 회차부터 시작
-    let currentDrawNo = (lastEntry && lastEntry.length > 0) ? lastEntry[0].draw_no + 1 : 1140;
+    // 데이터가 없으면 1145회부터 시작 (범위를 조금 좁혀 안정성 확보)
+    let currentDrawNo = (lastEntry && lastEntry.length > 0) ? lastEntry[0].draw_no + 1 : 1145;
 
     while (true) {
-      console.log(`📡 ${currentDrawNo}회차 데이터 수집 중...`);
+      console.log(`📡 ${currentDrawNo}회차 데이터 수집 시도...`);
       const data = await fetchLottoData(currentDrawNo);
 
-      if (data.returnValue === 'success') {
+      if (data && data.returnValue === 'success') {
         const { error } = await supabase.from('lotto_history').upsert({
           draw_no: data.drwNo,
           draw_date: data.drwNoDate,
@@ -40,16 +49,15 @@ async function syncLottoHistory() {
         if (error) throw error;
         console.log(`✅ ${data.drwNo}회차 저장 완료!`);
         
-        currentDrawNo++; // 다음 회차로 이동
-        // API 과부하 방지를 위한 짧은 휴식 (0.5초)
-        await new Promise(resolve => setTimeout(resolve, 500));
+        currentDrawNo++;
+        await new Promise(resolve => setTimeout(resolve, 1000)); // 휴식 시간 1초로 연장
       } else {
-        console.log(`🏁 수집 완료: ${currentDrawNo}회차는 아직 발표되지 않았습니다.`);
-        break; // 최신 회차까지 도달하면 루프 종료
+        console.log(`🏁 수집 종료: ${currentDrawNo}회차 정보가 없거나 API 제한에 걸렸습니다.`);
+        break; 
       }
     }
   } catch (err) {
-    console.error('❌ 에러 발생:', err.message);
+    console.error('❌ 최종 에러 발생:', err.message);
   }
 }
 
