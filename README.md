@@ -1,0 +1,2 @@
+# lotto-insight-dashboard
+로또번호생성기
