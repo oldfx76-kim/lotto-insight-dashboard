@@ -5,60 +5,39 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-async function fetchLottoData(drawNo) {
+async function fetchLatestLotto() {
   try {
-    const res = await fetch(`https://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo=${drawNo}`);
-    const text = await res.text(); // 먼저 텍스트로 받아서 확인
-    
-    // 응답이 HTML 형식이면 실패로 간주
-    if (text.includes('<!DOCTYPE')) {
-      return { returnValue: 'fail', reason: 'HTML_RESPONSE' };
-    }
-    
-    return JSON.parse(text);
-  } catch (e) {
-    return { returnValue: 'fail', reason: e.message };
-  }
-}
-
-async function syncLottoHistory() {
-  try {
-    console.log("🚀 로또 데이터 동기화 엔진 가동...");
-
+    // 1. DB에서 가장 최신 회차 찾기
     const { data: lastEntry } = await supabase
       .from('lotto_history')
       .select('draw_no')
       .order('draw_no', { ascending: false })
       .limit(1);
 
-    // 데이터가 없으면 1145회부터 시작 (범위를 조금 좁혀 안정성 확보)
-    let currentDrawNo = (lastEntry && lastEntry.length > 0) ? lastEntry[0].draw_no + 1 : 1145;
+    // 테이블이 비어있으면 1140회부터, 있으면 다음 회차부터 시작
+    const targetDrawNo = (lastEntry && lastEntry.length > 0) ? lastEntry[0].draw_no + 1 : 1140;
+    
+    console.log(`📡 [안전 모드] ${targetDrawNo}회차 데이터 수집 시도...`);
 
-    while (true) {
-      console.log(`📡 ${currentDrawNo}회차 데이터 수집 시도...`);
-      const data = await fetchLottoData(currentDrawNo);
+    const res = await fetch(`https://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo=${targetDrawNo}`);
+    const data = await res.json();
 
-      if (data && data.returnValue === 'success') {
-        const { error } = await supabase.from('lotto_history').upsert({
-          draw_no: data.drwNo,
-          draw_date: data.drwNoDate,
-          nums: [data.drwtNo1, data.drwtNo2, data.drwtNo3, data.drwtNo4, data.drwtNo5, data.drwtNo6],
-          bonus_no: data.bnusNo
-        });
+    if (data && data.returnValue === 'success') {
+      const { error } = await supabase.from('lotto_history').upsert({
+        draw_no: data.drwNo,
+        draw_date: data.drwNoDate,
+        nums: [data.drwtNo1, data.drwtNo2, data.drwtNo3, data.drwtNo4, data.drwtNo5, data.drwtNo6],
+        bonus_no: data.bnusNo
+      });
 
-        if (error) throw error;
-        console.log(`✅ ${data.drwNo}회차 저장 완료!`);
-        
-        currentDrawNo++;
-        await new Promise(resolve => setTimeout(resolve, 1000)); // 휴식 시간 1초로 연장
-      } else {
-        console.log(`🏁 수집 종료: ${currentDrawNo}회차 정보가 없거나 API 제한에 걸렸습니다.`);
-        break; 
-      }
+      if (error) throw error;
+      console.log(`✅ ${data.drwNo}회차 저장 완료!`);
+    } else {
+      console.log(`🏁 ${targetDrawNo}회차는 아직 발표 전이거나 API가 응답하지 않습니다.`);
     }
   } catch (err) {
-    console.error('❌ 최종 에러 발생:', err.message);
+    console.error('❌ 에러 발생:', err.message);
   }
 }
 
-syncLottoHistory();
+fetchLatestLotto();
