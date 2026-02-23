@@ -1,0 +1,19 @@
+name: Lotto Data Sync
+on:
+  schedule:
+    - cron: '30 12 * * 6' # 한국 시간 토요일 21:30 (자동 실행)
+  workflow_dispatch: # 직접 실행 버튼 활성화
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install @supabase/supabase-js
+      - run: node src/lib/fetch-lotto.mjs
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
